@@ -2,23 +2,21 @@
 package mdns
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"strconv"
 	"time"
 
-	"github.com/micro/go-micro/v3/router"
-	"github.com/micro/go-micro/v3/util/mdns"
+	mdns "github.com/unistack-org/micro-register-mdns/v3/util"
+	"github.com/unistack-org/micro/v3/router"
 )
 
 // NewRouter returns an initialized dns router
 func NewRouter(opts ...router.Option) router.Router {
-	options := router.DefaultOptions()
+	options := router.NewOptions(opts...)
 	for _, o := range opts {
 		o(&options)
-	}
-	if len(options.Network) == 0 {
-		options.Network = "micro"
 	}
 	return &mdnsRouter{options}
 }
@@ -42,21 +40,23 @@ func (m *mdnsRouter) Table() router.Table {
 	return nil
 }
 
-func (m *mdnsRouter) Lookup(service string, opts ...router.LookupOption) ([]router.Route, error) {
-	options := router.NewLookup(opts...)
+func (m *mdnsRouter) Lookup(opts ...router.QueryOption) ([]router.Route, error) {
+	options := router.NewQuery(opts...)
 
 	// check to see if we have the port provided in the service, e.g. go-micro-srv-foo:8000
-	srv, port, err := net.SplitHostPort(service)
+	service, port, err := net.SplitHostPort(options.Service)
 	if err != nil {
-		srv = service
+		service = options.Service
 	}
 
 	// query for the host
 	entries := make(chan *mdns.ServiceEntry)
 
-	p := mdns.DefaultParams(srv)
-	p.Timeout = time.Millisecond * 100
+	p := mdns.DefaultParams(service)
+	//p.Timeout = time.Millisecond * 100
 	p.Entries = entries
+	ctx, cancel := context.WithTimeout(m.options.Context, time.Millisecond*100)
+	defer cancel()
 
 	// check if we're using our own network
 	if len(options.Network) > 0 {
@@ -64,7 +64,7 @@ func (m *mdnsRouter) Lookup(service string, opts ...router.LookupOption) ([]rout
 	}
 
 	// do the query
-	if err := mdns.Query(p); err != nil {
+	if err := mdns.Query(ctx, p); err != nil {
 		return nil, err
 	}
 
@@ -110,6 +110,10 @@ func (m *mdnsRouter) Watch(opts ...router.WatchOption) (router.Watcher, error) {
 
 func (m *mdnsRouter) Close() error {
 	return nil
+}
+
+func (m *mdnsRouter) Name() string {
+	return m.options.Name
 }
 
 func (m *mdnsRouter) String() string {
